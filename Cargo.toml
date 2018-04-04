@@ -1,0 +1,18 @@
+[package]
+name = "findr"
+version = "0.1.0"
+authors = ["steve donovan <steve.j.donovan@gmail.com>"]
+
+description = "expression-oriented version of Unix find command"
+keywords = ["command-line","files"]
+
+repository = "https://github.com/stevedonovan/findr.git"
+readme = "readme.md"
+license="MIT"
+
+[dependencies]
+rhai = "0.8.2"
+chrono-english = "0.1.1"
+chrono = "0.4.1"
+walkdir = "0.1.8"
+
