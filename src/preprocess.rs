@@ -2,6 +2,7 @@
 use errors::*;
 use chrono_english::*;
 use chrono::prelude::*;
+use chrono::Duration;
 
 fn digit(ch: char) -> bool {
     ch.is_digit(10)
@@ -71,9 +72,16 @@ fn preprocess_dates(text: &str) -> BoxResult<String> {
                         let datestr = &s[0..ends];
                         // the actual substitution
                         let dt = parse_date_string(datestr,Utc::now(),Dialect::Uk)?;
-                        let dt = dt.timestamp().to_string();
-                        //eprintln!("{:?} {}",datestr,dt);
-                        res += &dt;
+                        if method == "on" {
+                            // "on" is special - the datestr expands to _two_ timestamps spanning the day
+                            let day_start = dt.with_hour(0).unwrap().with_minute(0).unwrap();
+                            let day_end = day_start + Duration::days(1);
+                            res += &day_start.timestamp().to_string();
+                            res += ",";
+                            res += &day_end.timestamp().to_string();
+                        } else {
+                            res += &dt.timestamp().to_string();
+                        }
                         s = &s[ends+1..]; // just after "
                     } else {
                         return err_io("unterminated string");
