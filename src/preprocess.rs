@@ -3,6 +3,11 @@ use errors::*;
 use chrono_english::*;
 use chrono::prelude::*;
 use chrono::Duration;
+use std::env;
+
+static DATE_METHODS: &[&str] = &["before","after","since","on","between"];
+
+const POSTFIXES: &[char] = &['k','m','g'];
 
 fn digit(ch: char) -> bool {
     ch.is_digit(10)
@@ -26,12 +31,12 @@ fn preprocess_numbers(text: &str) -> BoxResult<String> {
             let initial = iter.next().unwrap(); // cool because always extra space...
             let num: f64 = nums.parse()?;
             s = &s[end_num..];
-            if initial != ' ' {
+            if POSTFIXES.contains(&initial) {
                 let mult: u64 = match initial {
                     'k' => 1024,
                     'm' => 1024*1024,
                     'g' => 1024*1024*1024,
-                    _ => return err_io(&format!("bad postfix - got {}",initial))
+                    _ => unreachable!(),
                 };
                 let skip = if iter.next().unwrap() == 'b' { 2 } else { 1 };
                 let num = num * mult as f64;
@@ -46,9 +51,12 @@ fn preprocess_numbers(text: &str) -> BoxResult<String> {
     Ok(res)
 }
 
-static DATE_METHODS: &[&str] = &["before","after","since","on","between"];
-
 fn preprocess_dates(text: &str) -> BoxResult<String> {
+    let dialect = if env::var("FINDR_US").is_ok() {
+        Dialect::Us
+    } else {
+        Dialect::Uk
+    };
     let mut s = text;
     let mut res = String::new();
     let date = "date.";
@@ -71,7 +79,7 @@ fn preprocess_dates(text: &str) -> BoxResult<String> {
                     if let Some(ends) = s.find('"') {
                         let datestr = &s[0..ends];
                         // the actual substitution
-                        let dt = parse_date_string(datestr,Utc::now(),Dialect::Uk)?;
+                        let dt = parse_date_string(datestr,Local::now(),dialect)?;
                         if method == "on" {
                             // "on" is special - the datestr expands to _two_ timestamps spanning the day
                             let day_start = dt.with_hour(0).unwrap().with_minute(0).unwrap();
@@ -106,10 +114,13 @@ fn preprocess_dates(text: &str) -> BoxResult<String> {
 }
 
 pub fn create_filter(filter: &str) -> BoxResult<String> {
+    let debug = env::var("FINDR_DEBUG").is_ok();
     let filter = filter.to_lowercase() + " ";
     let filter = filter.replace(" and "," && ").replace(" or "," || ").replace(" not "," ! ");
     let res = preprocess_numbers(&filter)?;
+    if debug { println!("numbers {}",res); }
     let res_d = preprocess_dates(&res)?;
+    if debug { println!("dates {}",res_d); }
     let mut fun = String::new();
     fun += "fn filter(path,date) {\n\t";
     fun += &res_d;
