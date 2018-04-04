@@ -1,10 +1,11 @@
 [package]
 name = "findr"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["steve donovan <steve.j.donovan@gmail.com>"]
 
 description = "expression-oriented version of Unix find command"
-keywords = ["command-line","files"]
+keywords = ["command-line","files","find"]
+categories = ["command-line-utilities"]
 
 repository = "https://github.com/stevedonovan/findr.git"
 readme = "readme.md"
