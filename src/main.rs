@@ -112,6 +112,8 @@ impl DateImpl {
         engine.register_type::<DateImpl>();
         engine.register_fn("before",DateImpl::before);
         engine.register_fn("after",DateImpl::after);
+        // alias for after
+        engine.register_fn("since",DateImpl::after);
         engine.register_fn("between",DateImpl::between);
         // alias for between: preprocessor treats this specially
         engine.register_fn("on",DateImpl::between);
