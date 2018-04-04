@@ -3,7 +3,7 @@ extern crate rhai;
 extern crate chrono;
 extern crate chrono_english;
 
-const USAGE: &str = "
+const USAGE: &str = r#"
 findr <base-dir> <filter-function>
 where the filter-function is passed 'path' and 'date'
 path has the following fields:
@@ -16,11 +16,21 @@ path has the following fields:
 date has the following methods:
   - before(datestr)  all files modified before this date
   - after(datestr)   all files modified after this date
+  - on(datestr)      all files modified on this date (i.e. within 24h)
   - between(datestr,datestr)  all files modified between these dates
 
 For convenience, numbers may have size prefix (kb,mb,gb) and
-date strings are as defined by chrono-english.
-";
+date strings are as defined by chrono-english. "and","or" and "not"
+may be used instead of "&&","||" or "!".
+
+Set env var FINDR_US for American-style dates (m/d) - default is (d/m)
+
+Examples:
+$ findr . 'path.ext=="rs" && path.size > 1kb'
+$ findr . 'path.is_file && date.before("1 jan")'
+$ FINDR_US=1 findr . 'date.on("last 9/11")'
+
+"#;
 
 use walkdir::{DirEntry, WalkDir, WalkDirIterator};
 use rhai::{Engine,Scope,RegisterFn};

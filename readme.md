@@ -36,9 +36,13 @@ easier to type in a hurry.
 Numbers may have a size prefix (kb,mb,gb - not case-sensitive)
 and date strings are interpreted by [chrono-english](https://github.com/stevedonovan/chrono-english).
 
-No Flags Mini-philosophy:
-Currently, `findr` ignores hidden directories, and speaks British English (i.e. not "9/11").
-The idea is that such options will be passed as environment variables such as `FINDR_US`.
+Currently, `findr` ignores hidden directories.
+
+By default, it speaks British English dates (i.e. not "9/11"),
+unless the environment variable `FINDR_US` is defined.
+
+The "No Flags Mini-philosophy" remains important, and options should be few and
+controlled by environment variables.
 
 To illustrate my point about flags, the equivalent of `findr . 'path.ext="rs"'` is:
 
