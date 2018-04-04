@@ -40,4 +40,13 @@ No Flags Mini-philosophy:
 Currently, `findr` ignores hidden directories, and speaks British English (i.e. not "9/11").
 The idea is that such options will be passed as environment variables such as `FINDR_US`.
 
+To illustrate my point about flags, the equivalent of `findr . 'path.ext="rs"'` is:
+
+```
+find . -type d -path '*/\.*' -prune -o -not -name '.*' -type f -name '*.rs' -print
+```
+
+(I had to look that one up)
+
+
 
