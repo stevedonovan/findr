@@ -13,7 +13,7 @@ $ findr . 'path.is_file && date.before("1 jan")'
 $ findr . 'path.ext=="md" and date.after("last tuesday")'
 ```
 
-The filter expression is passed `path` and `date` and fairly arbitrary
+The filter expression is passed `path`, `date` and `mode` and fairly arbitrary
 expressions are supported, thanks to the very capable little embedded
 language [rhai](https://github.com/jonathandturner/rhai). As a little
 convenience, "and", "or" and "not" are understood, since these are
@@ -23,6 +23,8 @@ easier to type in a hurry.
 
   - `is_file`   is this path a file?
   - `is_dir`    is this path a directory?
+  - `is_exec`   is this file executable?
+  - `is_write`  is this path writeable?
   - `size`      size of file entry in bytes
   - `ext`       extension of file path
   - `file_name` file name part of path
@@ -32,6 +34,9 @@ easier to type in a hurry.
   - `before(datestr)`  all files modified before this date
   - `after(datestr)`   all files modified after this date
   - `between(datestr,datestr)`  all files modified between these dates
+
+`mode` is just the usual Unix permission bits - expressions may
+contain octal constants in Rust notation (e.g. `0o755`)
 
 Numbers may have a size prefix (kb,mb,gb - not case-sensitive)
 and date strings are interpreted by [chrono-english](https://github.com/stevedonovan/chrono-english).

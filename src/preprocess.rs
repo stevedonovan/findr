@@ -122,7 +122,7 @@ pub fn create_filter(filter: &str) -> BoxResult<String> {
     let res_d = preprocess_dates(&res)?;
     if debug { println!("dates {}",res_d); }
     let mut fun = String::new();
-    fun += "fn filter(path,date) {\n\t";
+    fun += "fn filter(path,date,mode) {\n\t";
     fun += &res_d;
     fun += "\n}\n";
     Ok(fun)

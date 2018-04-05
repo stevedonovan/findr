@@ -5,10 +5,12 @@ extern crate chrono_english;
 
 const USAGE: &str = r#"
 findr <base-dir> <filter-function>
-where the filter-function is passed 'path' and 'date'
+where the filter-function is passed 'path', 'date' and 'mode'
 path has the following fields:
   - is_file   is this path a file?
   - is_dir    is this path a directory?
+  - is_exec   is this file executable?
+  - is_write  is this path writeable?
   - size      size of file entry in bytes
   - ext       extension of file path
   - file_name file name part of path
@@ -18,6 +20,8 @@ date has the following methods:
   - after(datestr)   all files modified after this date
   - on(datestr)      all files modified on this date (i.e. within 24h)
   - between(datestr,datestr)  all files modified between these dates
+
+mode is the usual set of Unix permission bits.
 
 For convenience, numbers may have size prefix (kb,mb,gb) and
 date strings are as defined by chrono-english. "and","or" and "not"
@@ -42,6 +46,13 @@ mod preprocess;
 
 use std::time::UNIX_EPOCH;
 use std::fs::Metadata;
+
+// Windows will have to wait a bit...
+use std::os::unix::fs::MetadataExt;
+
+fn mode(m: &Metadata) -> i64 {
+    (m.mode() & 0o777) as i64
+}
 
 //use std::fs::File
 //use std::io;
@@ -70,6 +81,17 @@ impl PathImpl {
         self.metadata.is_dir()
     }
 
+    fn is_exec(&mut self) -> bool {
+        self.metadata.is_file() && mode(&self.metadata) & 0o100 != 0
+    }
+
+    fn is_write(&mut self) -> bool {
+        mode(&self.metadata) & 0o200 != 0
+    }
+
+    // would uid and guid be useful?
+    //fn uid(&mut self) -> i64
+
     fn size(&mut self) -> i64 {
         self.metadata.len() as i64
     }
@@ -89,6 +111,8 @@ impl PathImpl {
         engine.register_type::<PathImpl>();
         engine.register_get("is_file",PathImpl::is_file);
         engine.register_get("is_dir",PathImpl::is_dir);
+        engine.register_get("is_exec",PathImpl::is_exec);
+        engine.register_get("is_write",PathImpl::is_exec);
         engine.register_get("size",PathImpl::size);
         engine.register_get("ext",PathImpl::ext);
         engine.register_get("file_name",PathImpl::file_name);
@@ -133,14 +157,14 @@ impl DateImpl {
 fn run() -> BoxResult<()> {
     let mut args = std::env::args().skip(1);
     let base = args.next();
-    if base.is_none() {
+    let filter = args.next();
+    if base.is_none() || filter.is_none() {
         println!("{}",USAGE);
         return Ok(());
     }
     let base = base.unwrap();
-    let filter = args.next().unwrap(); // TBD!
+    let filter = filter.unwrap();
     let filter = preprocess::create_filter(&filter)?;
-    // println!("{}",filter);
 
     // fire up Rhai, register our types and compile our filter
     let mut engine = Engine::new();
@@ -165,9 +189,10 @@ fn run() -> BoxResult<()> {
                     Ok(metadata) => {
                         let tstamp = metadata.modified()?
                             .duration_since(UNIX_EPOCH)?.as_secs();
+                        let mut mode = mode(&metadata);
                         let mut path_obj = PathImpl::new(entry,metadata);
                         let mut date_obj = DateImpl::new(tstamp);
-                        let res = engine.call_fn::<_,_,bool>("filter",(&mut path_obj,&mut date_obj))?;
+                        let res = engine.call_fn::<_,_,bool>("filter",(&mut path_obj,&mut date_obj,&mut mode))?;
                         if res {
                             println!("{}", path.display());
                         }
