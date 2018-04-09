@@ -18,6 +18,10 @@ fn non_number(ch: char) -> bool {
     ! ch.is_digit(10) && ch != '.'
 }
 
+fn first_char(s: &str) -> char {
+    s.chars().next().unwrap()
+}
+
 // replace number literals with postfixes like '256kb' and '0.5mb'
 // with corresponding integers.
 fn preprocess_numbers(text: &str) -> BoxResult<String> {
@@ -29,7 +33,7 @@ fn preprocess_numbers(text: &str) -> BoxResult<String> {
         if let Some(mut end_num) = s.find(non_number) {
             let nums = &s[0..end_num];
             let mut iter = (&s[end_num..]).chars();
-            let initial = iter.next().unwrap(); // cool because always extra space...
+            let initial = iter.next().unwrap().to_ascii_lowercase(); // cool because always extra space...
             let num: f64 = nums.parse()?;
             s = &s[end_num..];
             if POSTFIXES.contains(&initial) {
@@ -39,7 +43,8 @@ fn preprocess_numbers(text: &str) -> BoxResult<String> {
                     'g' => 1024*1024*1024,
                     _ => unreachable!(),
                 };
-                let skip = if iter.next().unwrap() == 'b' { 2 } else { 1 };
+                // the trailing b is optional...
+                let skip = if iter.next().unwrap().to_ascii_lowercase() == 'b' { 2 } else { 1 };
                 let num = num * mult as f64;
                 res += &((num as u64).to_string());
                 s = &s[skip..];
@@ -50,10 +55,6 @@ fn preprocess_numbers(text: &str) -> BoxResult<String> {
     }
     res += s;
     Ok(res)
-}
-
-fn first_char(s: &str) -> char {
-    s.chars().next().unwrap()
 }
 
 // massage any string arguments of known `methods` of the object `obj`
@@ -139,7 +140,7 @@ fn preprocess_glob_patterns(text: &str) -> BoxResult<(String,Vec<Pattern>)> {
 
 pub fn create_filter(filter: &str, name: &str, args: &str) -> BoxResult<(String,Vec<Pattern>)> {
     let debug = env::var("FINDR_DEBUG").is_ok();
-    let filter = filter.to_lowercase() + " ";
+    let filter = filter.to_string() + " ";
     let filter = filter.replace(" and "," && ").replace(" or "," || ").replace(" not "," ! ");
     let res = preprocess_numbers(&filter)?;
     if debug { println!("numbers {}",res); }
