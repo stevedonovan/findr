@@ -2,24 +2,41 @@ extern crate walkdir;
 extern crate rhai;
 extern crate chrono;
 extern crate chrono_english;
+extern crate gitignore;
+extern crate glob;
+extern crate lapp;
 
 const USAGE: &str = r#"
-findr <base-dir> <filter-function>
-where the filter-function is passed 'path', 'date' and 'mode'
+findr: find files and filter with expressions
+
+  -n, --no-hidden look at hidden files and follow hidden dirs
+  -g, --no-gitignore do not respect .gitignore
+  -m, --manual show more detailed help about findr
+  -f, --follow-links follow symbolic links
+
+  <base-dir> (path) base directory to start traversal
+  <filter-function> (default 'true') filter paths
+"#;
+
+const MANUAL: &str = r#"
+The filter-function is passed 'path', 'date' and 'mode'
 path has the following fields:
-  - is_file   is this path a file?
-  - is_dir    is this path a directory?
-  - is_exec   is this file executable?
-  - is_write  is this path writeable?
-  - size      size of file entry in bytes
-  - ext       extension of file path
-  - file_name file name part of path
+  * is_file   is this path a file?
+  * is_dir    is this path a directory?
+  * is_exec   is this file executable?
+  * is_write  is this path writeable?
+  * size      size of file entry in bytes
+  * ext       extension of file path
+  * file_name file name part of path
+
+And the method:
+  * matches   path matches wildcard
 
 date has the following methods:
-  - before(datestr)  all files modified before this date
-  - after(datestr)   all files modified after this date
-  - on(datestr)      all files modified on this date (i.e. within 24h)
-  - between(datestr,datestr)  all files modified between these dates
+  * before(datestr)  all files modified before this date
+  * after(datestr)   all files modified after this date
+  * on(datestr)      all files modified on this date (i.e. within 24h)
+  * between(datestr,datestr)  all files modified between these dates
 
 mode is the usual set of Unix permission bits.
 
@@ -38,6 +55,7 @@ $ FINDR_US=1 findr . 'date.on("last 9/11")'
 
 use walkdir::{DirEntry, WalkDir, WalkDirIterator};
 use rhai::{Engine,Scope,RegisterFn};
+use glob::Pattern;
 
 mod errors;
 use errors::*;
@@ -46,6 +64,9 @@ mod preprocess;
 
 use std::time::UNIX_EPOCH;
 use std::fs::Metadata;
+use std::path::{Path,PathBuf};
+use std::io;
+use std::io::Write;
 
 // Windows will have to wait a bit...
 use std::os::unix::fs::MetadataExt;
@@ -53,10 +74,6 @@ use std::os::unix::fs::MetadataExt;
 fn mode(m: &Metadata) -> i64 {
     (m.mode() & 0o777) as i64
 }
-
-//use std::fs::File
-//use std::io;
-//use std::io::prelude::*;
 
 fn file_name(entry: &DirEntry) -> &str {
     entry.file_name().to_str().unwrap_or(&"?")
@@ -66,11 +83,26 @@ fn file_name(entry: &DirEntry) -> &str {
 struct PathImpl {
     entry: DirEntry,
     metadata: Metadata,
+    globs: Vec<Pattern>,
 }
 
 impl PathImpl {
-    fn new(entry: DirEntry, metadata: Metadata) -> PathImpl {
-        PathImpl { entry: entry, metadata: metadata }
+
+    // this is seriously ugly. We need to pre-create this object
+    // since it must look after the compiled glob patterns.
+    // But entry needs a valid initialization...
+    fn new(base: &Path, globs: Vec<Pattern>) -> BoxResult<PathImpl> {
+        let entry = WalkDir::new(base).into_iter().next().unwrap()?;
+        let metadata = entry.metadata()?;
+        Ok(PathImpl {
+            entry: entry, metadata: metadata,
+            globs: globs
+        })
+    }
+
+    fn set(&mut self, entry: DirEntry, metadata: Metadata) {
+        self.entry = entry;
+        self.metadata = metadata;
     }
 
     fn is_file(&mut self) -> bool {
@@ -107,15 +139,20 @@ impl PathImpl {
         file_name(&self.entry).into()
     }
 
+    fn matches(&mut self, idx: i64) -> bool {
+        self.globs[idx as usize].matches_path(self.entry.path())
+    }
+
     fn register(engine: &mut Engine) {
         engine.register_type::<PathImpl>();
         engine.register_get("is_file",PathImpl::is_file);
         engine.register_get("is_dir",PathImpl::is_dir);
         engine.register_get("is_exec",PathImpl::is_exec);
-        engine.register_get("is_write",PathImpl::is_exec);
+        engine.register_get("is_write",PathImpl::is_write);
         engine.register_get("size",PathImpl::size);
         engine.register_get("ext",PathImpl::ext);
         engine.register_get("file_name",PathImpl::file_name);
+        engine.register_fn("matches",PathImpl::matches);
     }
 
 }
@@ -154,17 +191,110 @@ impl DateImpl {
     }
 }
 
+///// What we Ignore when walking through directories
+struct GitIgnorePath {
+    files: Vec<PathBuf>,
+    depth: usize,
+}
+
+impl GitIgnorePath {
+    fn new(path: &Path, depth: usize) -> GitIgnorePath {
+        let full_path = path.canonicalize().unwrap();
+        let gile = gitignore::File::new(&full_path).unwrap();
+        GitIgnorePath{
+            files: gile.included_files().unwrap(),
+            depth: depth
+        }
+    }
+
+    fn is_excluded(&self, path: &Path) -> bool {
+        let full_path = path.canonicalize().unwrap();
+        self.files.iter().filter(|&p| p == &full_path).count() == 0
+    }
+}
+
+struct Ignore {
+    use_gitignore: bool,
+    hide_hidden: bool,
+    maybe_gitignore: Option<GitIgnorePath>,
+    at_start: bool,
+}
+
+impl Ignore {
+    fn new(use_gitignore: bool, hide_hidden: bool) -> Ignore {
+        Ignore {
+            use_gitignore: use_gitignore,
+            hide_hidden: hide_hidden,
+            maybe_gitignore: None,
+            at_start: true,
+        }
+    }
+
+    // entries to be passed through filter...
+    fn pass(&mut self, entry: &DirEntry) -> bool {
+        let fname = file_name(entry);
+        let path = entry.path();
+        if self.use_gitignore {
+            let mut dropped = false;
+            // is this path excluded by current .gitignore?
+            let ok = if let Some(ref gp) = self.maybe_gitignore {
+                if entry.depth() < gp.depth { // no longer in dirs controlled by this .gitignore
+                    //* println!("+{} {}",entry.depth(),path.display());
+                    dropped = true;
+                    true
+                } else {
+                    let excluded = gp.is_excluded(path);
+                    //* println!("{} {} {}",entry.depth(),excluded,path.display());
+                    ! excluded
+                }
+            } else {
+                //* println!("-{} {}",entry.depth(),path.display());
+                true
+            };
+            if dropped { // avoid the borrow...
+                self.maybe_gitignore = None;
+            }
+            if ! ok { // was excluded!
+                return false;
+            }
+            if entry.file_type().is_dir() {
+                // our task is to find if this directory contains .gitignore
+                let depth = entry.depth();
+                let gitignore_path = entry.path().join(".gitignore");
+                // track any .gitignore files and the depth at which they occur
+                if gitignore_path.exists() {
+                    //* println!("gitignore at {}",entry.depth());
+                    self.maybe_gitignore = Some(GitIgnorePath::new(&gitignore_path,depth+1));
+                }
+            }
+        }
+        // always pass first entry (could be . or .. which must not be hidden)
+        // (allows us to pick up ./.gitignore or ../.gitignore)
+        if self.at_start {
+            self.at_start = false;
+            return true;
+        }
+        if self.hide_hidden {
+            ! fname.starts_with('.')
+        } else {
+            true
+        }
+    }
+}
+
 fn run() -> BoxResult<()> {
-    let mut args = std::env::args().skip(1);
-    let base = args.next();
-    let filter = args.next();
-    if base.is_none() || filter.is_none() {
-        println!("{}",USAGE);
+    let args = lapp::parse_args(USAGE);
+    if args.get_bool("manual") {
+        println!("{}",MANUAL);
         return Ok(());
     }
-    let base = base.unwrap();
-    let filter = filter.unwrap();
-    let filter = preprocess::create_filter(&filter)?;
+    let base = args.get_path("base-dir");
+    let filter = args.get_string("filter-function");
+    let follow_hidden = args.get_bool("no-hidden");
+    let no_gitignore = args.get_bool("no-gitignore");
+    let follow_links = args.get_bool("follow-links");
+
+    let (filter,patterns) = preprocess::create_filter(&filter,"filter","path,date,mode")?;
 
     // fire up Rhai, register our types and compile our filter
     let mut engine = Engine::new();
@@ -175,10 +305,12 @@ fn run() -> BoxResult<()> {
 
     engine.eval_with_scope::<()>(&mut scope, &filter)?;
 
-    // we ignore the base dir itself
-    // and we don't want to visit hidden directories (for now)
-    let walker = WalkDir::new(&base).min_depth(1).into_iter();
-    for entry in walker.filter_entry(|e| ! file_name(e).starts_with('.')) {
+    let walker = WalkDir::new(&base).follow_links(follow_links).into_iter();
+    let mut ignore = Ignore::new(! no_gitignore, ! follow_hidden);
+    let mut path_obj = PathImpl::new(&base, patterns)?;
+    let stdout = io::stdout();
+    let mut out = stdout.lock();
+    for entry in walker.filter_entry(|e| ignore.pass(e) ) {
         // ugliness alert...these matches feel clumsy..
         match entry {
             Err(e) => eprintln!("bad entry {}",e),
@@ -190,11 +322,11 @@ fn run() -> BoxResult<()> {
                         let tstamp = metadata.modified()?
                             .duration_since(UNIX_EPOCH)?.as_secs();
                         let mut mode = mode(&metadata);
-                        let mut path_obj = PathImpl::new(entry,metadata);
+                        path_obj.set(entry,metadata);
                         let mut date_obj = DateImpl::new(tstamp);
                         let res = engine.call_fn::<_,_,bool>("filter",(&mut path_obj,&mut date_obj,&mut mode))?;
                         if res {
-                            println!("{}", path.display());
+                            write!(out,"{}\n", path.display())?;
                         }
                     }
                 }
@@ -208,5 +340,6 @@ fn run() -> BoxResult<()> {
 fn main() {
     if let Err(e) = run() {
         eprintln!("error: {}",e);
+        std::process::exit(1);
     }
 }

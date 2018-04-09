@@ -1,6 +1,6 @@
 [package]
 name = "findr"
-version = "0.1.1"
+version = "0.1.2"
 authors = ["steve donovan <steve.j.donovan@gmail.com>"]
 
 description = "expression-oriented version of Unix find command"
@@ -13,7 +13,11 @@ license="MIT"
 
 [dependencies]
 rhai = "0.8.2"
-chrono-english = "0.1.1"
+chrono-english = "0.1.2"
 chrono = "0.4.1"
 walkdir = "0.1.8"
+gitignore = "1.0.6"
+glob = "0.2.11"   
+lapp = "0.3.1"
+
 
