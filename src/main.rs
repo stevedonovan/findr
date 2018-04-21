@@ -217,6 +217,20 @@ impl GitIgnorePath {
         let full_path = path.canonicalize().unwrap();
         self.files.iter().filter(|&p| p == &full_path).count() == 0
     }
+
+    fn exists(path: &Path) -> Option<PathBuf> {
+        let gitignore_path = path.join(".gitignore");
+        if gitignore_path.exists() {
+            Some(gitignore_path)
+        } else {
+            let ignore_path = path.join(".ignore");
+            if ignore_path.exists() {
+                Some(ignore_path)
+            } else {
+                None
+            }
+        }
+    }
 }
 
 struct Ignore {
@@ -261,12 +275,9 @@ impl Ignore {
                 return false;
             }
             if entry.file_type().is_dir() {
-                // our task is to find if this directory contains .gitignore
-                let depth = entry.depth();
-                let gitignore_path = entry.path().join(".gitignore");
-                // track any .gitignore files and the depth at which they occur
-                if gitignore_path.exists() {
-                    self.maybe_gitignore = Some(GitIgnorePath::new(&gitignore_path,depth+1));
+                // track any .gitignore/.ignore files and the depth at which they occur
+                if let Some(ignore_path) = GitIgnorePath::exists(entry.path()) {
+                    self.maybe_gitignore = Some(GitIgnorePath::new(&ignore_path, entry.depth() + 1));
                 }
             }
         }
