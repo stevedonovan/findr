@@ -11,11 +11,17 @@ findr: find files and filter with expressions
 
   -n, --no-hidden look at hidden files and follow hidden dirs
   -g, --no-gitignore do not respect .gitignore
-  -m, --manual show more detailed help about findr
   -f, --follow-links follow symbolic links
+  -m, --manual show more detailed help about findr
 
   <base-dir> (path) base directory to start traversal
   <filter-function> (default 'true') filter paths
+
+If a filter is not provided and the base is not a dir, then
+it is interpreted as a glob pattern searching from current dir.
+If the glob does not start with '*', then:
+  *  file-pattern becomes */file-pattern
+  * .ext becomes *.ext
 "#;
 
 const MANUAL: &str = r#"
@@ -239,16 +245,13 @@ impl Ignore {
             // is this path excluded by current .gitignore?
             let ok = if let Some(ref gp) = self.maybe_gitignore {
                 if entry.depth() < gp.depth { // no longer in dirs controlled by this .gitignore
-                    //* println!("+{} {}",entry.depth(),path.display());
                     dropped = true;
                     true
                 } else {
                     let excluded = gp.is_excluded(path);
-                    //* println!("{} {} {}",entry.depth(),excluded,path.display());
                     ! excluded
                 }
             } else {
-                //* println!("-{} {}",entry.depth(),path.display());
                 true
             };
             if dropped { // avoid the borrow...
@@ -263,7 +266,6 @@ impl Ignore {
                 let gitignore_path = entry.path().join(".gitignore");
                 // track any .gitignore files and the depth at which they occur
                 if gitignore_path.exists() {
-                    //* println!("gitignore at {}",entry.depth());
                     self.maybe_gitignore = Some(GitIgnorePath::new(&gitignore_path,depth+1));
                 }
             }
@@ -288,8 +290,21 @@ fn run() -> BoxResult<()> {
         println!("{}",MANUAL);
         return Ok(());
     }
-    let base = args.get_path("base-dir");
-    let filter = args.get_string("filter-function");
+    let mut base = args.get_path("base-dir");
+    let mut filter = args.get_string("filter-function");
+    if filter == "true" { //* strictly speaking, if 2nd arg isn't present!
+        if ! (base.exists() && base.is_dir()) {
+            let glob = base.to_str().expect("can't get path as string").to_string();
+            let wildcard = if ! glob.starts_with('*') {
+                // .ext beomes *.ext, file becomes */file
+                if glob.starts_with('.') {"*"} else {"*/"}
+            } else {
+                ""
+            };
+            filter = format!("path.matches(\"{}{}\")",wildcard,glob);
+            base = PathBuf::from(".");
+        }
+    }
     let follow_hidden = args.get_bool("no-hidden");
     let no_gitignore = args.get_bool("no-gitignore");
     let follow_links = args.get_bool("follow-links");
