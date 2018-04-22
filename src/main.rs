@@ -1,8 +1,8 @@
-extern crate walkdir;
+extern crate ignore;
+extern crate regex;
 extern crate rhai;
 extern crate chrono;
 extern crate chrono_english;
-extern crate gitignore;
 extern crate glob;
 extern crate lapp;
 
@@ -59,7 +59,7 @@ $ FINDR_US=1 findr . 'date.on("last 9/11")'
 
 "#;
 
-use walkdir::{DirEntry, WalkDir, WalkDirIterator};
+use ignore::{WalkBuilder, DirEntry};
 use rhai::{Engine,Scope,RegisterFn};
 use glob::Pattern;
 
@@ -76,6 +76,7 @@ use std::io::Write;
 
 // Windows will have to wait a bit...
 use std::os::unix::fs::MetadataExt;
+
 
 fn mode(m: &Metadata) -> i64 {
     (m.mode() & 0o777) as i64
@@ -98,7 +99,7 @@ impl PathImpl {
     // since it must look after the compiled glob patterns.
     // But entry needs a valid initialization...
     fn new(base: &Path, globs: Vec<Pattern>) -> BoxResult<PathImpl> {
-        let entry = WalkDir::new(base).into_iter().next().unwrap()?;
+        let entry = WalkBuilder::new(base).build().next().unwrap()?;
         let metadata = entry.metadata()?;
         Ok(PathImpl {
             entry: entry, metadata: metadata,
@@ -197,104 +198,6 @@ impl DateImpl {
     }
 }
 
-///// What we Ignore when walking through directories
-struct GitIgnorePath {
-    files: Vec<PathBuf>,
-    depth: usize,
-}
-
-impl GitIgnorePath {
-    fn new(path: &Path, depth: usize) -> GitIgnorePath {
-        let full_path = path.canonicalize().unwrap();
-        let gile = gitignore::File::new(&full_path).unwrap();
-        GitIgnorePath{
-            files: gile.included_files().unwrap(),
-            depth: depth
-        }
-    }
-
-    fn is_excluded(&self, path: &Path) -> bool {
-        let full_path = path.canonicalize().unwrap();
-        self.files.iter().filter(|&p| p == &full_path).count() == 0
-    }
-
-    fn exists(path: &Path) -> Option<PathBuf> {
-        let gitignore_path = path.join(".gitignore");
-        if gitignore_path.exists() {
-            Some(gitignore_path)
-        } else {
-            let ignore_path = path.join(".ignore");
-            if ignore_path.exists() {
-                Some(ignore_path)
-            } else {
-                None
-            }
-        }
-    }
-}
-
-struct Ignore {
-    use_gitignore: bool,
-    hide_hidden: bool,
-    maybe_gitignore: Option<GitIgnorePath>,
-    at_start: bool,
-}
-
-impl Ignore {
-    fn new(use_gitignore: bool, hide_hidden: bool) -> Ignore {
-        Ignore {
-            use_gitignore: use_gitignore,
-            hide_hidden: hide_hidden,
-            maybe_gitignore: None,
-            at_start: true,
-        }
-    }
-
-    // entries to be passed through filter...
-    fn pass(&mut self, entry: &DirEntry) -> bool {
-        let fname = file_name(entry);
-        let path = entry.path();
-        if self.use_gitignore {
-            let mut dropped = false;
-            // is this path excluded by current .gitignore?
-            let ok = if let Some(ref gp) = self.maybe_gitignore {
-                if entry.depth() < gp.depth { // no longer in dirs controlled by this .gitignore
-                    dropped = true;
-                    true
-                } else {
-                    let excluded = gp.is_excluded(path);
-                    ! excluded
-                }
-            } else {
-                true
-            };
-            if dropped { // avoid the borrow...
-                self.maybe_gitignore = None;
-            }
-            if ! ok { // was excluded!
-                return false;
-            }
-            if entry.file_type().is_dir() {
-                // track any .gitignore/.ignore files and the depth at which they occur
-                if let Some(ignore_path) = GitIgnorePath::exists(entry.path()) {
-                    self.maybe_gitignore = Some(GitIgnorePath::new(&ignore_path, entry.depth() + 1));
-                }
-            }
-        }
-        // always pass first entry (could be . or .. which must not be hidden)
-        // (allows us to pick up ./.gitignore or ../.gitignore)
-        if self.at_start {
-            self.at_start = false;
-            return true;
-        }
-        if self.hide_hidden {
-            ! fname.starts_with('.')
-        } else {
-            true
-        }
-    }
-}
-
 fn run() -> BoxResult<()> {
     let args = lapp::parse_args(USAGE);
     if args.get_bool("manual") {
@@ -331,12 +234,16 @@ fn run() -> BoxResult<()> {
 
     engine.eval_with_scope::<()>(&mut scope, &filter)?;
 
-    let walker = WalkDir::new(&base).follow_links(follow_links).into_iter();
-    let mut ignore = Ignore::new(! no_gitignore, ! follow_hidden);
+    let walker = WalkBuilder::new(&base)
+        .follow_links(follow_links)
+        .git_ignore(! no_gitignore)
+        .ignore(! no_gitignore)
+        .hidden(! follow_hidden)
+        .build();
     let mut path_obj = PathImpl::new(&base, patterns)?;
     let stdout = io::stdout();
     let mut out = stdout.lock();
-    for entry in walker.filter_entry(|e| ignore.pass(e) ) {
+    for entry in walker {
         // ugliness alert...these matches feel clumsy..
         match entry {
             Err(e) => eprintln!("bad entry {}",e),

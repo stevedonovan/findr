@@ -4,109 +4,70 @@ use chrono_english::*;
 use chrono::prelude::*;
 use chrono::Duration;
 use glob::Pattern;
+use regex::{Regex,RegexBuilder,Captures};
 use std::env;
+use std::error::Error;
 
 static DATE_METHODS: &[&str] = &["before","after","since","on","between"];
-
-const POSTFIXES: &[char] = &['k','m','g'];
-
-fn digit(ch: char) -> bool {
-    ch.is_digit(10)
-}
-
-fn non_number(ch: char) -> bool {
-    ! ch.is_digit(10) && ch != '.'
-}
-
-fn first_char(s: &str) -> char {
-    s.chars().next().unwrap()
-}
 
 // replace number literals with postfixes like '256kb' and '0.5mb'
 // with corresponding integers.
 fn preprocess_numbers(text: &str) -> BoxResult<String> {
-    let mut s = text;
-    let mut res = String::new();
-    while let Some(start_num) = s.find(digit) {
-        res += &s[0..start_num];
-        s = &s[start_num..]; // "245kb..."
-        if let Some(mut end_num) = s.find(non_number) {
-            let nums = &s[0..end_num];
-            let mut iter = (&s[end_num..]).chars();
-            let initial = iter.next().unwrap().to_ascii_lowercase(); // cool because always extra space...
-            let num: f64 = nums.parse()?;
-            s = &s[end_num..];
-            if POSTFIXES.contains(&initial) {
-                let mult: u64 = match initial {
-                    'k' => 1024,
-                    'm' => 1024*1024,
-                    'g' => 1024*1024*1024,
-                    _ => unreachable!(),
-                };
-                // the trailing b is optional...
-                let skip = if iter.next().unwrap().to_ascii_lowercase() == 'b' { 2 } else { 1 };
-                let num = num * mult as f64;
-                res += &((num as u64).to_string());
-                s = &s[skip..];
-            } else {
-                res += nums;
+    let number_with_postfix = RegexBuilder::new(r#"(\d+(\.\d+)*)(k|m|g)b*"#).case_insensitive(true).build()?;
+    let mut conversion_error: Option<String> = None;
+    let res = number_with_postfix.replace_all(text,|caps: &Captures| {
+        let nums = &caps[1];
+        let num = match nums.parse::<f64>() {
+            Ok(x) => x,
+            Err(e) => {
+                conversion_error = Some(e.description().into());
+                return "".into();
             }
-        }
+        };
+        let postfix = &caps[3];
+        let mult: u64 = match postfix {
+            "k" | "K" => 1024,
+            "m" | "M" => 1024*1024,
+            "g" | "G" => 1024*1024*1024,
+            _ => unreachable!(),
+        };
+        let num = num * mult as f64;
+        num.to_string()
+    });
+    if let Some(err) = conversion_error {
+        err_io(&err)
+    } else {
+        Ok(res.into_owned())
     }
-    res += s;
-    Ok(res)
 }
 
 // massage any string arguments of known `methods` of the object `obj`
 fn preprocess_string_arguments<C>(text: &str, obj: &str, methods: &[&str], mut process: C) -> BoxResult<String>
 where C: FnMut(&str,&str) -> BoxResult<String>  {
-    let mut s = text;
-    let mut res = String::new();
-    let obj_dot = format!("{}.",obj);
-    while let Some(start_obj) = s.find(&obj_dot) {
-        let start_obj = start_obj + obj_dot.len();
-        res += &s[0..start_obj]; // everything up to OBJ.
-        s = &s[start_obj..];
-        let midx = s.find(|c:char| ! (c.is_alphanumeric() || c == '_')).unwrap();
-        if (&s[midx..]).starts_with('(') {
-            let method = &s[0..midx];
-            if ! methods.contains(&method) {
-                return err_io(&format!("unknown {} method {}",obj,method));
-            }
-            res += &s[0..midx];
-            res.push('(');
-            s = &s[midx+1..];
-            loop {
-                let ch = first_char(s);
-                if ch == '"' {
-                    s = &s[1..];
-                    if let Some(ends) = s.find('"') {
-                        // the actual substitution
-                        let subst = process(method,&s[0..ends])?;
-                        res += &subst;
-                        s = &s[ends+1..]; // just after "
-                    } else {
-                        return err_io("unterminated string");
-                    }
-                } else {
-                    return err_io("bad argument - must be string");
-                }
-                // either , or )
-                let ch = first_char(s);
-                res.push(ch);
-                s = &s[1..];
-                if ch == ')' {
-                    break;
-                }
-            }
-        } else {
-           // just pass through fields (for now)
-           res += &s[0..midx+1];
-           s = &s[midx+1..];
+    let seek_method_args = Regex::new(&format!("{}{}",obj,r#"\.([[:alpha:]]+)\s*\([^\)]+\)"#))?;
+    let seek_string = Regex::new(r#"\s*"([^"]+)"\s*"#)?;
+    let mut possible_error: Option<String> = None;
+    let res = seek_method_args.replace_all(text, |caps: &Captures| {
+        let method = &caps[1];
+        if ! methods.contains(&method) {
+            possible_error = Some(format!("unknown {} method {}: available {:?}",obj,method,methods));
+            return "".into();
         }
+        seek_string.replace_all(&caps[0], |caps: &Captures| {
+            match process(method,&caps[1]) {
+                Ok(s) => s,
+                Err(e) => {
+                    possible_error = Some(e.description().into());
+                    return "".into();
+                }
+            }
+        }).into_owned()
+    });
+    if let Some(err) = possible_error {
+        err_io(&err)
+    } else {
+        Ok(res.into_owned())
     }
-    res += s;
-    Ok(res)
 }
 
 // convert date strings into Unix timestamps using chrono-english

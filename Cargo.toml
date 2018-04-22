@@ -15,9 +15,9 @@ license="MIT"
 rhai = "0.8.2"
 chrono-english = "0.1.2"
 chrono = "0.4.1"
-walkdir = "0.1.8"
-gitignore = "1.0.6"
-glob = "0.2.11"   
+ignore = "0.4.2"
+regex = "0.2.10"
+glob = "0.2.11"
 lapp = "0.3.1"
 
 
