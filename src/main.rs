@@ -36,7 +36,8 @@ path has the following fields:
   * file_name file name part of path
 
 And the method:
-  * matches   path matches wildcard
+  * matches              path matches wildcard
+  * matches_ignore_case  path matches wildcard, ignoring ASCII case
 
 date has the following methods:
   * before(datestr)  all files modified before this date
