@@ -44,7 +44,7 @@ fn preprocess_numbers(text: &str) -> BoxResult<String> {
 // massage any string arguments of known `methods` of the object `obj`
 fn preprocess_string_arguments<C>(text: &str, obj: &str, methods: &[&str], mut process: C) -> BoxResult<String>
 where C: FnMut(&str,&str) -> BoxResult<String>  {
-    let seek_method_args = Regex::new(&format!("{}{}",obj,r#"\.([[:alpha:]]+)\s*\([^\)]+\)"#))?;
+    let seek_method_args = Regex::new(&format!("{}{}",obj,r#"\.([[:alpha:]_]+)\s*\([^\)]+\)"#))?;
     let seek_string = Regex::new(r#"\s*"([^"]+)"\s*"#)?;
     let mut possible_error: Option<String> = None;
     let res = seek_method_args.replace_all(text, |caps: &Captures| {
