@@ -8,7 +8,11 @@ use regex::{Regex,RegexBuilder,Captures};
 use std::env;
 use std::error::Error;
 
+pub use GlobIgnoreCase;
+
 static DATE_METHODS: &[&str] = &["before","after","since","on","between"];
+// please place the shortest common prefix last
+static PATH_METHODS: &[&str] = &["matches_ignore_case", "matches"];
 
 // replace number literals with postfixes like '256kb' and '0.5mb'
 // with corresponding integers.
@@ -90,16 +94,21 @@ fn preprocess_dates(text: &str) -> BoxResult<String> {
     })
 }
 
-fn preprocess_glob_patterns(text: &str) -> BoxResult<(String,Vec<Pattern>)> {
+fn preprocess_glob_patterns(text: &str) -> BoxResult<(String,Vec<(Pattern, GlobIgnoreCase)>)> {
     let mut patterns = Vec::new();
-    let res = preprocess_string_arguments(text,"path",&["matches"],|_,glob_str| {
-        patterns.push(Pattern::new(glob_str)?);
+    let res = preprocess_string_arguments(text, "path", PATH_METHODS, |method, glob_str| {
+        let ignore_case = if method == "matches_ignore_case" {
+            GlobIgnoreCase::CaseInsensitive
+        } else {
+            GlobIgnoreCase::CaseSensitive
+        };
+        patterns.push((Pattern::new(glob_str)?, ignore_case));
         Ok((patterns.len()-1).to_string())
     })?;
     Ok((res,patterns))
 }
 
-pub fn create_filter(filter: &str, name: &str, args: &str) -> BoxResult<(String,Vec<Pattern>)> {
+pub fn create_filter(filter: &str, name: &str, args: &str) -> BoxResult<(String,Vec<(Pattern, GlobIgnoreCase)>)> {
     let debug = env::var("FINDR_DEBUG").is_ok();
     let filter = filter.to_string() + " ";
     let filter = filter.replace(" and "," && ").replace(" or "," || ").replace(" not "," ! ");
