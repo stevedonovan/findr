@@ -29,7 +29,8 @@ easier to type in a hurry.
   - `ext`       extension of file path
   - `file_name` file name part of path
 
-There's also a `matches` method (e.g. `path.matches("*/readme.*")`).
+There's also a `matches` method (e.g. `path.matches("*/readme.*")`),
+and an ASCII-case-insensitive counterpart `matches_ignore_case`.
 
 `date` has the following methods:
 
