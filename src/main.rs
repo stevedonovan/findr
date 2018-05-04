@@ -36,7 +36,8 @@ path has the following fields:
   * file_name file name part of path
 
 And the method:
-  * matches   path matches wildcard
+  * matches              path matches wildcard
+  * matches_ignore_case  path matches wildcard, ignoring ASCII case
 
 date has the following methods:
   * before(datestr)  all files modified before this date
@@ -61,7 +62,7 @@ $ FINDR_US=1 findr . 'date.on("last 9/11")'
 
 use ignore::{WalkBuilder, DirEntry};
 use rhai::{Engine,Scope,RegisterFn};
-use glob::Pattern;
+use glob::{MatchOptions, Pattern};
 
 mod errors;
 use errors::*;
@@ -86,11 +87,21 @@ fn file_name(entry: &DirEntry) -> &str {
     entry.file_name().to_str().unwrap_or(&"?")
 }
 
+#[derive(Clone, Debug)]
+/// Facade for `glob::MatchOptions.case_sensitive`
+///
+/// Since `glob::MatchOptions` doesn't implement `Debug`, we can't put
+/// it in `PathImpl.glob` directly
+pub enum GlobIgnoreCase {
+    CaseSensitive,
+    CaseInsensitive,
+}
+
 #[derive(Clone)]
 struct PathImpl {
     entry: DirEntry,
     metadata: Metadata,
-    globs: Vec<Pattern>,
+    globs: Vec<(Pattern, GlobIgnoreCase)>,
 }
 
 impl PathImpl {
@@ -98,7 +109,7 @@ impl PathImpl {
     // this is seriously ugly. We need to pre-create this object
     // since it must look after the compiled glob patterns.
     // But entry needs a valid initialization...
-    fn new(base: &Path, globs: Vec<Pattern>) -> BoxResult<PathImpl> {
+    fn new(base: &Path, globs: Vec<(Pattern, GlobIgnoreCase)>) -> BoxResult<PathImpl> {
         let entry = WalkBuilder::new(base).build().next().unwrap()?;
         let metadata = entry.metadata()?;
         Ok(PathImpl {
@@ -147,7 +158,12 @@ impl PathImpl {
     }
 
     fn matches(&mut self, idx: i64) -> bool {
-        self.globs[idx as usize].matches_path(self.entry.path())
+        let ref pattern = self.globs[idx as usize].0;
+        let ref options = match self.globs[idx as usize].1 {
+            GlobIgnoreCase::CaseSensitive => MatchOptions::new(),
+            GlobIgnoreCase::CaseInsensitive => MatchOptions::default(),
+        };
+        pattern.matches_path_with(self.entry.path(), &options)
     }
 
     fn register(engine: &mut Engine) {
@@ -160,6 +176,7 @@ impl PathImpl {
         engine.register_get("ext",PathImpl::ext);
         engine.register_get("file_name",PathImpl::file_name);
         engine.register_fn("matches",PathImpl::matches);
+        engine.register_fn("matches_ignore_case",PathImpl::matches);
     }
 
 }
