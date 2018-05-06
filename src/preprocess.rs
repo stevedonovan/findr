@@ -110,7 +110,11 @@ fn preprocess_glob_patterns(text: &str) -> BoxResult<(String,Vec<(Pattern, GlobI
 
 pub fn create_filter(filter: &str, name: &str, args: &str) -> BoxResult<(String,Vec<(Pattern, GlobIgnoreCase)>)> {
     let debug = env::var("FINDR_DEBUG").is_ok();
-    let filter = filter.to_string() + " ";
+    // be a little careful in replacing _words_
+    let filter = Regex::new(r"\band\b")?.replace(filter,"&&").into_owned();
+    let filter = Regex::new(r"\bor\b")?.replace(&filter,"||").into_owned();
+    let filter = Regex::new(r"\bnot\b")?.replace(&filter,"!").into_owned();
+
     let filter = filter.replace(" and "," && ").replace(" or "," || ").replace(" not "," ! ");
     let res = preprocess_numbers(&filter)?;
     if debug { println!("numbers {}",res); }
@@ -125,4 +129,41 @@ pub fn create_filter(filter: &str, name: &str, args: &str) -> BoxResult<(String,
         }
     }
     Ok((fun,patterns))
+}
+
+fn word_rest(txt: &str) -> (&str,&str) {
+    if let Some(space_pos) = txt.find(' ') {
+        let (word,rest) = txt.split_at(space_pos);
+        (word,rest.trim_left())
+    } else {
+        (txt,"")
+    }
+}
+
+pub fn preprocess_quick_filter(glob: &str, nocase: bool) -> String {
+    let (glob,rest) = word_rest(&glob);
+
+    let wildcard = if ! glob.starts_with('*') {
+        // .ext beomes *.ext, file becomes */file
+        if glob.starts_with('.') {"*"} else {"*/"}
+    } else {
+        ""
+    };
+    // the generated filter just calls the appropriate match method on path
+    let mut filter = format!("path.{}(\"{}{}\")",
+        if nocase {"matches_ignore_case"} else {"matches"},wildcard,glob
+    );
+
+    if rest.len() > 0 {
+        let (op,rest) = word_rest(rest);
+        filter = if op == "<" || op == ">" {
+            format!("{} && path.size {} {}",filter,op,rest)
+        } else {
+            format!("{} && date.{}(\"{}\")",filter,op,rest)
+        }
+    };
+    if env::var("FINDR_DEBUG").is_ok() {
+        println!("quick filter {}",filter);
+    }
+    filter
 }

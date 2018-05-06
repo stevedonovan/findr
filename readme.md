@@ -54,11 +54,12 @@ findr: find files and filter with expressions
 
   -n, --no-hidden look at hidden files and follow hidden dirs
   -g, --no-gitignore do not respect .gitignore
+  -f, --follow-links follow symbolic links
+  -i, --case-insensitive do case-insensitive glob matches
   -m, --manual show more detailed help about findr
 
   <base-dir> (path) base directory to start traversal
   <filter-function> (default 'true') filter paths
-
 ```
 
 By default, it speaks British English dates (i.e. not "9/11"),
@@ -66,7 +67,8 @@ unless the environment variable `FINDR_US` is defined.
 
 Respecting `.gitignore` is something that makes your life easier if you are not particularly interested
 in build artifacts. It is particularly useful in Rust projects because incremental compilation
-generates a _lot_ of intermediate build artifacts.
+generates a _lot_ of intermediate build artifacts. (if you _do_ need to override the defaults
+then `-gn` will do the job.)
 
 With `findr`, I can now finally answer the question "What the f*k did I do on Tuesday?":
 
@@ -91,13 +93,45 @@ With `findr`, I can now finally answer the question "What the f*k did I do on Tu
 ```
 With the `-g` flag (ignore `.gitignore`) there are 538 files changed on that day!
 
-To illustrate my point about flag madness, the equivalent of `findr . 'path.ext="rs"'` is:
+To illustrate my point about flag madness, the exact equivalent of `findr . 'path.ext="rs"'` is:
 
 ```
 find . -type d -path '*/\.*' -prune -o -not -name '.*' -type f -name '*.rs' -print
 ```
 
 (I had to look that one up)
+
+## Shortcut Filters
+
+A feature inspired by the defaults of `ripgrep` is _shortcut filters_.
+
+To quote the --manual:
+
+```
+If a filter is not provided and the base is not a dir, then
+it is interpreted as a glob pattern searching from current dir.
+If the glob does not start with '*', then:
+  *  file-pattern becomes */file-pattern
+  * .ext becomes *.ext
+```
+
+That is, `findr readme.md` is equivalent to `findr . 'path.matches("*/readme.md")`,
+and `findr .c` is equivalent to `findr . 'path.matches("*.c")`.
+
+The `--case-insensitive` (`-i`) flag will emit `matches_ignore_case` instead of `matches`,
+so that `findr -i 'readme.*'` will match `README.TXT`, `README.md` or any of the many
+variations found in the wild.
+
+Furthermore we allow an additional condition after this implied glob
+pattern. If it's `<` or `>`, then the meaning is a path size expression, otherwise
+it's a time expression.
+
+So `findr '.c after last tues'` will give me all C source files modified after last Tuesday,
+and `findr '.doc > 256Kb'` gives all .doc files greater than 256Kb. (The single quotes
+remain important to protect our expressions from shell wildcard expansion.)
+
+To see what transformations that `findr` does on its filter, set the environment
+variable `FINDR_DEBUG`.
 
 
 

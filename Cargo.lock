@@ -38,7 +38,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 
 [[package]]
 name = "findr"
-version = "0.1.4"
+version = "0.1.5"
 dependencies = [
  "chrono 0.4.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "chrono-english 0.1.2 (registry+https://github.com/rust-lang/crates.io-index)",

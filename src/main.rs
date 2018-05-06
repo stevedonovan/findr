@@ -7,11 +7,12 @@ extern crate glob;
 extern crate lapp;
 
 const USAGE: &str = r#"
-findr: find files and filter with expressions
+findr 0.1.5: find files and filter with expressions
 
   -n, --no-hidden look at hidden files and follow hidden dirs
   -g, --no-gitignore do not respect .gitignore
   -f, --follow-links follow symbolic links
+  -i, --case-insensitive do case-insensitive glob matches
   -m, --manual show more detailed help about findr
 
   <base-dir> (path) base directory to start traversal
@@ -19,9 +20,6 @@ findr: find files and filter with expressions
 
 If a filter is not provided and the base is not a dir, then
 it is interpreted as a glob pattern searching from current dir.
-If the glob does not start with '*', then:
-  *  file-pattern becomes */file-pattern
-  * .ext becomes *.ext
 "#;
 
 const MANUAL: &str = r#"
@@ -58,6 +56,24 @@ $ findr . 'path.ext=="rs" && path.size > 1kb'
 $ findr . 'path.is_file && date.before("1 jan")'
 $ FINDR_US=1 findr . 'date.on("last 9/11")'
 
+Shortcut Syntax:
+
+If only one argument is supplied, it is treated as a glob.
+If the glob does not start with '*', then:
+  *  file-pattern becomes */file-pattern
+  * .ext becomes *.ext
+The --case-insensitive flag makes us use matches_no_case
+instead of matches.
+
+There can be an extra condition. If the glob is followed by
+'<' or '>' then the extra condition is size; otherwise
+it is a date expression:
+
+Examples:
+$ findr .rs
+$ findr -i readme.md
+$ findr '.c after last tues'
+$ findr '.doc > 256Kb'
 "#;
 
 use ignore::{WalkBuilder, DirEntry};
@@ -226,13 +242,7 @@ fn run() -> BoxResult<()> {
     if filter == "true" { //* strictly speaking, if 2nd arg isn't present!
         if ! (base.exists() && base.is_dir()) {
             let glob = base.to_str().expect("can't get path as string").to_string();
-            let wildcard = if ! glob.starts_with('*') {
-                // .ext beomes *.ext, file becomes */file
-                if glob.starts_with('.') {"*"} else {"*/"}
-            } else {
-                ""
-            };
-            filter = format!("path.matches(\"{}{}\")",wildcard,glob);
+            filter = preprocess::preprocess_quick_filter(&glob, args.get_bool("case-insensitive"));
             base = PathBuf::from(".");
         }
     }
