@@ -124,7 +124,7 @@ variations found in the wild.
 
 Furthermore we allow an additional condition after this implied glob
 pattern. If it's `<` or `>`, then the meaning is a path size expression, otherwise
-it's a time expression. You can use `?` to "escape" space in shortcut filters, however this
+it's a time expression. You can use `?` to "escape" space in the glob part, however this
 would match other characters too.
 
 So `findr '.c after last tues'` will give me all C source files modified after last Tuesday,
