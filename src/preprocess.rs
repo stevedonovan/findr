@@ -131,9 +131,9 @@ pub fn create_filter(filter: &str, name: &str, args: &str) -> BoxResult<(String,
     Ok((fun,patterns))
 }
 
-fn word_rest(txt: &str) -> (&str,&str) {
-    if let Some(space_pos) = txt.find(' ') {
-        let (word,rest) = txt.split_at(space_pos);
+fn word_rest(txt: &str, sep: char) -> (&str,&str) {
+    if let Some(pos) = txt.find(sep) {
+        let (word,rest) = (&txt[0..pos], &txt[pos+1..]);
         (word,rest.trim_left())
     } else {
         (txt,"")
@@ -141,8 +141,25 @@ fn word_rest(txt: &str) -> (&str,&str) {
 }
 
 pub fn preprocess_quick_filter(glob: &str, nocase: bool) -> String {
-    let (glob,rest) = word_rest(&glob);
-
+    // The idea is to check if the filter contains spaces and then
+    // to interpret the rest as either a time or a size condition.
+    // May separate the glob from the condition with a semicolon
+    let (mut glob,rest) = if ! glob.contains(';') {
+        // However, some people use spaces in files! So the hack
+        // is to check whether the glob ends with an extension or a slash
+        let ext_or_slash = Regex::new(r"(\.\S+|\S/)$").unwrap().is_match(glob);
+        if ! ext_or_slash {
+            word_rest(&glob,' ')
+        } else {
+            (glob,"")
+        }
+    } else {
+        word_rest(&glob,';')
+    };
+    // may need the slash to disambiguate, but it must go...
+    if glob.ends_with('/') {
+        glob = &glob[0..glob.len()-1]
+    }
     let wildcard = if ! glob.starts_with('*') {
         // .ext beomes *.ext, file becomes */file
         if glob.starts_with('.') {"*"} else {"*/"}
@@ -155,7 +172,7 @@ pub fn preprocess_quick_filter(glob: &str, nocase: bool) -> String {
     );
 
     if rest.len() > 0 {
-        let (op,rest) = word_rest(rest);
+        let (op,rest) = word_rest(rest,' ');
         filter = if op == "<" || op == ">" {
             format!("{} && path.size {} {}",filter,op,rest)
         } else {

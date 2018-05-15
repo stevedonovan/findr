@@ -124,12 +124,18 @@ variations found in the wild.
 
 Furthermore we allow an additional condition after this implied glob
 pattern. If it's `<` or `>`, then the meaning is a path size expression, otherwise
-it's a time expression. You can use `?` to "escape" space in the glob part, however this
-would match other characters too.
+it's a time expression.
 
 So `findr '.c after last tues'` will give me all C source files modified after last Tuesday,
 and `findr '.doc > 256Kb'` gives all .doc files greater than 256Kb. (The single quotes
 remain important to protect our expressions from shell wildcard expansion.)
+
+Filenames that contain spaces require special attention. We look for extensions or
+trailing forward slash, so `findr 'name with spaces.txt'` or `findr 'dir with space/'`
+works as expected.
+
+Alternatively, you can use a semicolon to separate the 'glob' from the condition,
+as in `findr '* review latest.doc; size > 30kb'`.
 
 To see what transformations that `findr` does on its filter, set the environment
 variable `FINDR_DEBUG`.
