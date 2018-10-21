@@ -36,7 +36,7 @@ fn percent_subst(s: &str) -> String {
 }
 
 pub fn command(cmd: &str) -> Option<String> {
-    if cmd != "none" {
+    if !cmd.is_empty() {
         let debug = env::var("FINDR_DEBUG").is_ok();
         let mut command = cmd.to_string();
         if ! command.contains("%(") {

@@ -17,7 +17,8 @@ findr 0.1.5: find files and filter with expressions
 
   <base-dir> (path) base directory to start traversal
   <filter-function> (default 'true') filter paths
-  <command> (default 'none') optional command
+  <run> (default 'none') none, run or dir
+  <command> (default '') optional command following run or dir
 
 If a filter is not provided and the base is not a dir, then
 it is interpreted as a glob pattern searching from current dir.
@@ -91,6 +92,7 @@ use std::fs::Metadata;
 use std::path::{Path,PathBuf};
 use std::io;
 use std::io::Write;
+use std::env;
 
 // Windows will have to wait a bit...
 use std::os::unix::fs::MetadataExt;
@@ -251,10 +253,13 @@ fn run() -> BoxResult<()> {
     }
     let mut base = args.get_path("base-dir");
     let mut filter = args.get_string("filter-function");
-    let command = args.get_string("command");
-    if filter == "true" { //* strictly speaking, if 2nd arg isn't present!
+    let mut run = args.get_string("run");
+    let mut command = args.get_string("command");
+    if filter == "true" || filter == "none" || filter == "dir" || filter == "run" {
         if ! (base.exists() && base.is_dir()) {
             let glob = base.to_str().expect("can't get path as string").to_string();
+            command = run.clone();
+            run = filter.clone();
             filter = preprocess::preprocess_quick_filter(&glob, args.get_bool("case-insensitive"));
             base = PathBuf::from(".");
         }
@@ -265,7 +270,11 @@ fn run() -> BoxResult<()> {
 
     let (filter,patterns) = preprocess::create_filter(&filter,"filter","path,date,mode")?;
 
-    let command = command::command(&command);
+    let command = if run == "run" || run == "dir" {
+        command::command(&command)
+    } else {
+        None
+    };
 
     // fire up Rhai, register our types and compile our filter
     let mut engine = Engine::new();
@@ -306,9 +315,14 @@ fn run() -> BoxResult<()> {
                         let res = engine.call_fn::<_,_,bool>("filter",(&mut path_obj,&mut date_obj,&mut mode))?;
                         if res {
                             if let Some(_) = command {
-                                path_obj.set(entry.clone(),metadata.clone());
-                                date_obj = DateImpl::new(tstamp);
                                 let s = engine.call_fn::<_,_,String>("cmd",(&mut path_obj,&mut date_obj))?;
+                                if run == "dir" {
+                                    if let Some(parent) = path.parent() {
+                                        let parent = parent.canonicalize()?;
+                                        println!("{:?}", parent);
+                                        env::set_current_dir(parent)?;
+                                    }
+                                }
                                 let s = command::exec(&s)?;
                                 write!(out,"{}", s)?;
                             } else {
