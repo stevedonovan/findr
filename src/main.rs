@@ -17,6 +17,7 @@ findr 0.1.5: find files and filter with expressions
 
   <base-dir> (path) base directory to start traversal
   <filter-function> (default 'true') filter paths
+  <command> (default 'none') optional command
 
 If a filter is not provided and the base is not a dir, then
 it is interpreted as a glob pattern searching from current dir.
@@ -82,7 +83,7 @@ use glob::{MatchOptions, Pattern};
 
 mod errors;
 use errors::*;
-
+mod command;
 mod preprocess;
 
 use std::time::UNIX_EPOCH;
@@ -173,6 +174,15 @@ impl PathImpl {
         file_name(&self.entry).into()
     }
 
+    fn path(&mut self) -> String {
+        self.entry.path().display().to_string()
+    }
+
+    fn dir(&mut self) -> String {
+        self.entry.path().parent().unwrap_or(Path::new(".")).display().to_string()
+    }
+
+
     fn matches(&mut self, idx: i64) -> bool {
         let ref pattern = self.globs[idx as usize].0;
         let ref options = match self.globs[idx as usize].1 {
@@ -191,6 +201,8 @@ impl PathImpl {
         engine.register_get("size",PathImpl::size);
         engine.register_get("ext",PathImpl::ext);
         engine.register_get("file_name",PathImpl::file_name);
+        engine.register_get("path",PathImpl::path);
+        engine.register_get("dir",PathImpl::dir);
         engine.register_fn("matches",PathImpl::matches);
         engine.register_fn("matches_ignore_case",PathImpl::matches);
     }
@@ -239,6 +251,7 @@ fn run() -> BoxResult<()> {
     }
     let mut base = args.get_path("base-dir");
     let mut filter = args.get_string("filter-function");
+    let command = args.get_string("command");
     if filter == "true" { //* strictly speaking, if 2nd arg isn't present!
         if ! (base.exists() && base.is_dir()) {
             let glob = base.to_str().expect("can't get path as string").to_string();
@@ -252,6 +265,8 @@ fn run() -> BoxResult<()> {
 
     let (filter,patterns) = preprocess::create_filter(&filter,"filter","path,date,mode")?;
 
+    let command = command::command(&command);
+
     // fire up Rhai, register our types and compile our filter
     let mut engine = Engine::new();
     let mut scope = Scope::new();
@@ -260,6 +275,10 @@ fn run() -> BoxResult<()> {
     DateImpl::register(&mut engine);
 
     engine.eval_with_scope::<()>(&mut scope, &filter)?;
+
+    if let Some(ref command) = command {
+        engine.eval_with_scope::<()>(&mut scope, &command)?;
+    }
 
     let walker = WalkBuilder::new(&base)
         .follow_links(follow_links)
@@ -282,11 +301,19 @@ fn run() -> BoxResult<()> {
                         let tstamp = metadata.modified()?
                             .duration_since(UNIX_EPOCH)?.as_secs();
                         let mut mode = mode(&metadata);
-                        path_obj.set(entry,metadata);
+                        path_obj.set(entry.clone(),metadata.clone());
                         let mut date_obj = DateImpl::new(tstamp);
                         let res = engine.call_fn::<_,_,bool>("filter",(&mut path_obj,&mut date_obj,&mut mode))?;
                         if res {
-                            write!(out,"{}\n", path.display())?;
+                            if let Some(_) = command {
+                                path_obj.set(entry.clone(),metadata.clone());
+                                date_obj = DateImpl::new(tstamp);
+                                let s = engine.call_fn::<_,_,String>("cmd",(&mut path_obj,&mut date_obj))?;
+                                let s = command::exec(&s)?;
+                                write!(out,"{}", s)?;
+                            } else {
+                                write!(out,"{}\n", path.display())?;
+                            }
                         }
                     }
                 }
